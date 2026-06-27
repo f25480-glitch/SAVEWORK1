@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#1565c0">
+  <title>บันทึกวันทำงาน</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <button type="button" id="btnBack" class="icon-btn hidden" aria-label="กลับ">←</button>
+    <h1 id="pageTitle">หน้าหลัก</h1>
+  </header>
+
+  <main id="app">
+    <section id="viewHome" class="view active">
+      <div class="card today-card">
+        <p class="label-sm">วันนี้</p>
+        <p id="todayDate" class="today-date"></p>
+        <div class="time-row">
+          <div><span class="label-sm">เข้างาน</span><p id="todayCheckIn">ยังไม่บันทึก</p></div>
+          <div><span class="label-sm">ออกงาน</span><p id="todayCheckOut">ยังไม่บันทึก</p></div>
+        </div>
+        <p id="todayDuration" class="muted hidden"></p>
+        <p id="todayWage" class="wage-highlight hidden"></p>
+        <div class="btn-row">
+          <button type="button" id="btnCheckIn" class="btn btn-primary">เข้างาน</button>
+          <button type="button" id="btnCheckOut" class="btn btn-secondary">ออกงาน</button>
+        </div>
+      </div>
+
+      <div class="card summary-card">
+        <p class="section-title">สรุปรายได้สะสม (A&amp;S / Bosch)</p>
+        <p class="muted note">คำนวณอัตโนมัติเมื่อบันทึกเข้า-ออกงานครบ</p>
+        <div class="stats-grid">
+          <div><span class="label-sm">รวมวันทำงาน</span><p id="totalDays">0 วัน</p></div>
+          <div><span class="label-sm">รวมชั่วโมง</span><p id="totalHours">0 ชม. 0 น.</p></div>
+          <div class="stat-wide"><span class="label-sm">รวมรายได้สะสม</span><p id="totalWage" class="wage-total">0.00 บาท</p></div>
+        </div>
+      </div>
+
+      <div class="section-header"><h2>ประวัติการทำงาน</h2></div>
+      <p id="emptyHistory" class="empty-state">ยังไม่มีประวัติ</p>
+      <ul id="historyList" class="history-list"></ul>
+    </section>
+
+    <section id="viewCalendar" class="view">
+      <div class="card calendar-card">
+        <div class="month-nav">
+          <button type="button" id="btnPrevMonth" class="icon-btn" aria-label="เดือนก่อนหน้า">‹</button>
+          <h2 id="monthYear"></h2>
+          <button type="button" id="btnNextMonth" class="icon-btn" aria-label="เดือนถัดไป">›</button>
+        </div>
+        <div class="weekdays">
+          <span>อา</span><span>จ</span><span>อ</span><span>พ</span><span>พฤ</span><span>ศ</span><span>ส</span>
+        </div>
+        <div id="calendarGrid" class="calendar-grid"></div>
+      </div>
+
+      <div id="selectedDayCard" class="card clickable">
+        <p class="label-sm">รายละเอียดวันที่เลือก</p>
+        <p id="selectedDate" class="selected-date"></p>
+        <pre id="selectedDetail" class="detail-text"></pre>
+        <p class="tap-hint">แตะเพื่อเข้าไปบันทึกหรือแก้ไข</p>
+      </div>
+    </section>
+
+    <section id="viewDayDetail" class="view">
+      <div class="card">
+        <p id="dayDetailDate" class="selected-date"></p>
+        <label class="field">
+          <span>กะงาน</span>
+          <select id="shiftSelect"></select>
+        </label>
+        <div id="timeFields">
+          <label class="field">
+            <span>เข้างาน</span>
+            <input type="time" id="editCheckIn">
+          </label>
+          <label class="field">
+            <span>ออกงาน</span>
+            <input type="time" id="editCheckOut">
+          </label>
+        </div>
+        <label class="field">
+          <span>บันทึก/โน้ต</span>
+          <textarea id="editNote" rows="3" placeholder="โน้ตเพิ่มเติม"></textarea>
+        </label>
+        <p id="previewDuration" class="muted hidden"></p>
+        <pre id="previewWage" class="preview-wage hidden"></pre>
+        <div class="btn-row">
+          <button type="button" id="btnSave" class="btn btn-primary">บันทึก</button>
+          <button type="button" id="btnClear" class="btn btn-outline">ล้างข้อมูล</button>
+        </div>
+      </div>
+      <div id="savedPreviewCard" class="card hidden">
+        <p class="label-sm">ข้อมูลที่บันทึกแล้ว</p>
+        <pre id="savedPreview" class="detail-text"></pre>
+      </div>
+    </section>
+
+    <section id="viewInfo" class="view">
+      <div class="card info-card">
+        <h2>บริษัท A&amp;S</h2>
+        <p>บริษัทรับเหมาแรงงาน จัดหางาน ฝึกอบรม และปรึกษาแรงงาน<br>(พวกเราเป็นลูกจ้างของ บ. A&amp;S)</p>
+        <p class="muted">สำนักงาน: 222/11-12 ม.4 ต.มาบยางพร อ.ปลวกแดง จ.ระยอง 21140<br>โทร 038-891020, 038-891041</p>
+      </div>
+      <div class="card info-card">
+        <h2>บริษัท บ๊อช ออโตโมทีฟ จำกัด</h2>
+        <p>บริษัทลูกค้าของ บ. A&amp;S ที่ส่งพวกเราเข้าไปทำงาน<br>ตั้งอยู่ที่นิคมอมตะซิตี้ ผลิตชิ้นส่วนรถยนต์</p>
+        <p class="muted">ทำงาน จันทร์-ศุกร์ | หยุด เสาร์-อาทิตย์</p>
+      </div>
+      <div class="card info-card">
+        <h2>ค่าจ้างและเบี้ยเลี้ยง</h2>
+        <ul class="info-list">
+          <li>ค่าจ้างรายวัน 400 + พิเศษ 12.50 = 412.50 บาท/วัน</li>
+          <li>OT วันทำงาน x1.5 (50 บ./ชม.)</li>
+          <li>ทำงานวันหยุด x2 | OT วันหยุด x3</li>
+          <li>กะดึกเพิ่ม: ค่ากะ 165 + ข้าว 65 + นม 65 บาท</li>
+        </ul>
+      </div>
+      <div class="card info-card">
+        <h2>สวัสดิการ</h2>
+        <ul class="info-list">
+          <li>ค่าเช่าบ้าน 1,000 บาท/เดือน</li>
+          <li>กะเช้ามีข้าวเลี้ยง + โอทีช่วงกลางวัน</li>
+          <li>ประกันอุบัติเหตุ 100,000 บาท</li>
+          <li>มีรถรับ-ส่งพนักงาน</li>
+        </ul>
+      </div>
+      <div class="card info-card">
+        <h2>ส่งออก / นำเข้าข้อมูล</h2>
+        <p class="muted">คัดลอก JSON ไปใช้กับแอป Android หรือเครื่องอื่น</p>
+        <div class="btn-row">
+          <button type="button" id="btnExport" class="btn btn-secondary">คัดลอกข้อมูล</button>
+          <button type="button" id="btnImport" class="btn btn-outline">นำเข้าข้อมูล</button>
+        </div>
+        <textarea id="importExportArea" class="import-area hidden" rows="6" placeholder="วาง JSON ที่นี่"></textarea>
+        <button type="button" id="btnConfirmImport" class="btn btn-primary hidden">ยืนยันนำเข้า</button>
+      </div>
+    </section>
+  </main>
+
+  <nav class="bottom-nav">
+    <button type="button" class="nav-item active" data-view="home">
+      <span class="nav-icon">🏠</span><span>หน้าหลัก</span>
+    </button>
+    <button type="button" class="nav-item" data-view="calendar">
+      <span class="nav-icon">📅</span><span>ปฏิทิน</span>
+    </button>
+    <button type="button" class="nav-item" data-view="info">
+      <span class="nav-icon">ℹ️</span><span>ข้อมูล</span>
+    </button>
+  </nav>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="js/workday.js"></script>
+</body>
+</html>
