@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#1565c0">
   <title>บันทึกวันทำงาน A&amp;S / Bosch</title>
   <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body>
   <header class="app-header">
@@ -150,6 +151,10 @@
           <span>วันเริ่มงาน</span>
           <input type="date" id="profileStartDate">
         </label>
+        <label class="field">
+          <span>วันเริ่ม 4 หยุด 2 (ถ้ามี)</span>
+          <input type="date" id="profileStartDate4Off2">
+        </label>
         <fieldset class="field">
           <span>ตารางงาน</span>
           <div class="radio-group">
@@ -187,10 +192,17 @@
           <button type="button" id="btnOpenUploadPage" class="btn btn-secondary">ไปหน้าส่งรูป/ไฟล์</button>
         </div>
       </div>
-      <div id="uploadPreviewCard" class="card hidden">
-        <p class="label-sm">ไฟล์ที่อัปโหลดแล้ว</p>
-        <p id="uploadFileName" class="muted"></p>
-        <div id="uploadPreview"></div>
+      <div class="card">
+        <h2 class="section-title">ดูตัวอย่าง / ดาวน์โหลด</h2>
+        <p class="muted note">เลือกเดือนเพื่อดูข้อมูลบันทึกและดาวน์โหลด PDF</p>
+        <label class="field">
+          <span>เลือกเดือนสำหรับดู</span>
+          <select id="previewMonthSelect"></select>
+        </label>
+        <div class="btn-row">
+          <button type="button" id="btnPreviewLoadPdf" class="btn btn-primary">โหลด / ดาวน์โหลด PDF</button>
+          <button type="button" id="btnPreviewShowDetails" class="btn btn-secondary">ดูตัวอย่างข้อมูล</button>
+        </div>
       </div>
       <div class="card">
         <h2 class="section-title">ส่งออก / นำเข้าข้อมูล</h2>
@@ -206,8 +218,6 @@
         <p class="label-sm">ตัวอย่างข้อมูลเดือนที่เลือก</p>
         <pre id="documentsPreview" class="detail-text"></pre>
       </div>
-      <p id="emptyDocuments" class="empty-state">ยังไม่มีเอกสาร — เลือกเดือนแล้วอัปโหลด</p>
-      <ul id="documentsList" class="history-list"></ul>
     </section>
 
     <section id="viewDocumentsUpload" class="view">
@@ -232,6 +242,11 @@
         <p class="label-sm">ไฟล์ที่อัปโหลดแล้ว</p>
         <p id="uploadPageFileName" class="muted"></p>
         <div id="uploadPagePreview"></div>
+      </div>
+      <div class="card">
+        <p class="label-sm">ไฟล์ทั้งหมด</p>
+        <p id="emptyUploadPageDocuments" class="empty-state">ยังไม่มีไฟล์ — อัปโหลดจากด้านบน</p>
+        <ul id="uploadPageDocumentsList" class="history-list"></ul>
       </div>
     </section>
 

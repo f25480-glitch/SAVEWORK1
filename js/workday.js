@@ -109,14 +109,20 @@
       this.lastName = data.lastName || '';
       this.department = data.department || '';
       this.startDate = data.startDate || '';
+      this.startDate4Off2 = data.startDate4Off2 || '';
       this.scheduleType = data.scheduleType || '5off2';
     }
     get fullName() { return (this.firstName + ' ' + this.lastName).trim(); }
     isComplete() { return this.startDate.length > 0; }
+    getScheduleStartDate() {
+      if (this.scheduleType === '4off2' && this.startDate4Off2) return this.startDate4Off2;
+      return this.startDate;
+    }
     toJSON() {
       return {
         employeeId: this.employeeId, firstName: this.firstName, lastName: this.lastName,
-        department: this.department, startDate: this.startDate, scheduleType: this.scheduleType,
+        department: this.department, startDate: this.startDate, startDate4Off2: this.startDate4Off2,
+        scheduleType: this.scheduleType,
       };
     }
     static fromJSON(obj) { return new EmployeeProfile(obj); }
@@ -213,8 +219,10 @@
   }
 
   function is4Off2RestDay(dateKey, profile) {
-    if (!profile || profile.scheduleType !== '4off2' || !profile.startDate) return false;
-    const dayIndex = daysBetween(profile.startDate, dateKey);
+    if (!profile || profile.scheduleType !== '4off2') return false;
+    const scheduleStartDate = profile.getScheduleStartDate ? profile.getScheduleStartDate() : profile.startDate;
+    if (!scheduleStartDate) return false;
+    const dayIndex = daysBetween(scheduleStartDate, dateKey);
     if (dayIndex < 0) return false;
     return (dayIndex % 6) >= 4;
   }
@@ -916,7 +924,8 @@
       $('monthYear').textContent = formatMonthYear(state.calYear, state.calMonth);
       const hint = $('scheduleHint');
       if (profile.scheduleType === '4off2' && profile.startDate) {
-        hint.textContent = '4 หยุด 2: วันหยุดตามรอบ (สีแดง) นับจาก ' + formatDisplayDate(profile.startDate);
+        const scheduleStartDate = profile.getScheduleStartDate ? profile.getScheduleStartDate() : profile.startDate;
+        hint.textContent = '4 หยุด 2: วันหยุดตามรอบ (สีแดง) นับจาก ' + formatDisplayDate(scheduleStartDate);
         hint.classList.remove('hidden');
       } else {
         hint.classList.add('hidden');
@@ -1149,6 +1158,7 @@
       $('profileLastName').value = profile.lastName;
       $('profileDepartment').value = profile.department;
       $('profileStartDate').value = profile.startDate;
+      $('profileStartDate4Off2').value = profile.startDate4Off2 || '';
       document.querySelectorAll('input[name="scheduleType"]').forEach(function (radio) {
         radio.checked = radio.value === profile.scheduleType;
       });
@@ -1160,6 +1170,9 @@
           'เริ่มงาน: ' + formatDisplayDate(profile.startDate),
           'ตาราง: ' + (profile.scheduleType === '4off2' ? '4 หยุด 2' : '5 หยุด 2 (3 กะ)'),
         ];
+        if (profile.scheduleType === '4off2' && profile.startDate4Off2) {
+          lines.splice(3, 0, 'เริ่ม 4 หยุด 2: ' + formatDisplayDate(profile.startDate4Off2));
+        }
         $('profileSummaryText').textContent = lines.join('\n');
         $('profileSummary').classList.remove('hidden');
       } else {
@@ -1174,12 +1187,14 @@
       document.querySelectorAll('input[name="scheduleType"]').forEach(function (radio) {
         if (radio.checked) scheduleType = radio.value;
       });
+      const startDate4Off2 = $('profileStartDate4Off2').value;
       profile = new EmployeeProfile({
         employeeId: $('profileEmployeeId').value.trim(),
         firstName: $('profileFirstName').value.trim(),
         lastName: $('profileLastName').value.trim(),
         department: $('profileDepartment').value.trim(),
         startDate: startDate,
+        startDate4Off2: startDate4Off2,
         scheduleType: scheduleType,
       });
       profileStorage.save(profile);
@@ -1224,6 +1239,9 @@
         profileLines.push('พนักงาน: ' + (profile.employeeId || '-') + ' | ' + profile.fullName);
         profileLines.push('แผนก: ' + (profile.department || '-'));
         profileLines.push('วันเริ่มงาน: ' + formatDisplayDate(profile.startDate));
+        if (profile.scheduleType === '4off2' && profile.startDate4Off2) {
+          profileLines.push('วันเริ่ม 4 หยุด 2: ' + formatDisplayDate(profile.startDate4Off2));
+        }
         profileLines.push('ตารางงาน: ' + (profile.scheduleType === '4off2' ? '4 หยุด 2' : '5 หยุด 2 (3 กะ)'));
       } else {
         profileLines.push('ยังไม่ตั้งค่าโปรไฟล์');
@@ -1235,24 +1253,28 @@
       html += '<p>วันที่สร้าง: ' + formatDisplayDateToday() + '</p>';
       html += '</div>';
       html += '<table><thead><tr>';
-      html += '<th>วันที่</th><th>สถานะ/กะ</th><th>เข้า</th><th>ออก</th><th>สาย</th><th>ชั่วโมง</th><th>รายได้</th><th>โน้ต</th>';
+      html += '<th>วันที่</th><th>วัน</th><th>กะ</th><th>เข้า</th><th>ออก</th><th>สาย</th><th>ชั่วโมง</th><th>ค่ากะ</th><th>รายได้</th><th>โน้ต</th>';
       html += '</tr></thead><tbody>';
       if (records.length === 0) {
-        html += '<tr><td colspan="8" style="text-align:center; padding: 18px;">ยังไม่มีบันทึกในเดือนนี้</td></tr>';
+        html += '<tr><td colspan="10" style="text-align:center; padding: 18px;">ยังไม่มีบันทึกในเดือนนี้</td></tr>';
       } else {
         records.forEach(function (record) {
           const shiftLabel = record.isNonWorkStatus() ? getStatusLabel(record.status) : record.isHolidayOff() ? getShiftLabel(ShiftType.HOLIDAY) : getShiftLabel(record.shiftType);
+          const dayOfWeek = parseDateKey(record.date).toLocaleDateString('th-TH', { weekday: 'short' });
           const duration = record.hasCompleteWorkTime() ? calculateDuration(record.checkIn, record.checkOut) : '';
+          const shiftAllowance = CompanyWagePolicy.getShiftAllowance(record.shiftType, profile);
           const payText = record.hasCompleteWorkTime() ? formatMoney(calculatePay(record, profile)) : '-';
           html += '<tr>';
           html += '<td>' + formatDisplayDate(record.date) + '</td>';
+          html += '<td>' + dayOfWeek + '</td>';
           html += '<td>' + shiftLabel + '</td>';
           html += '<td>' + (record.checkIn || '-') + '</td>';
           html += '<td>' + (record.checkOut || '-') + '</td>';
-          html += '<td>' + (record.lateMinutes > 0 ? record.lateMinutes + ' นาที' : '-') + '</td>';
+          html += '<td>' + (record.lateMinutes > 0 ? record.lateMinutes + ' น.' : '-') + '</td>';
           html += '<td>' + (duration || '-') + '</td>';
+          html += '<td>' + (shiftAllowance > 0 ? formatMoney(shiftAllowance) : '-') + '</td>';
           html += '<td>' + payText + '</td>';
-          html += '<td class="note-cell">' + (record.note || '-') + '</td>';
+          html += '<td class="note-cell" style="font-size:0.8rem;">' + (record.note || '-') + '</td>';
           html += '</tr>';
         });
       }
@@ -1299,6 +1321,77 @@
       popup.document.close();
       popup.focus();
       setTimeout(function () { popup.print(); }, 400);
+    }
+
+    function previewLoadPdf() {
+      const monthKey = $('previewMonthSelect').value;
+      if (!monthKey) {
+        showToast('กรุณาเลือกเดือน');
+        return;
+      }
+      const htmlContent = buildMonthReportHtml(monthKey);
+      const element = document.createElement('div');
+      element.innerHTML = '<style>' +
+        'body{font-family:Arial,Helvetica,sans-serif;margin:0;padding:24px;color:#1a1a2e;background:#fff;}' +
+        '.report-title{font-size:1.5rem;font-weight:700;margin-bottom:16px;}' +
+        '.report-subtitle{color:#64748b;font-size:1.125rem;margin-bottom:16px;}' +
+        '.report-summary p{margin:0 0 8px;}' +
+        'table{width:100%;border-collapse:collapse;margin-top:16px;}' +
+        'th,td{border:1px solid #cbd5e1;padding:10px 12px;text-align:left;vertical-align:top;font-size:0.85rem;}' +
+        'th{background:#f8fafc;font-weight:700;}' +
+        '.note-cell{white-space:pre-wrap;}' +
+        '</style>' + htmlContent;
+
+      const opt = {
+        margin: 10,
+        filename: 'workday-' + monthKey + '.pdf',
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4' }
+      };
+      html2pdf().set(opt).from(element).save();
+      showToast('ดาวน์โหลด PDF แล้ว');
+    }
+
+    function previewShowDetails() {
+      const monthKey = $('previewMonthSelect').value;
+      if (!monthKey) {
+        showToast('กรุณาเลือกเดือน');
+        return;
+      }
+      const records = getMonthRecords(monthKey);
+      if (records.length === 0) {
+        showToast('ไม่มีบันทึกในเดือนนี้');
+        return;
+      }
+      const lines = ['=== ข้อมูลการบันทึกงาน ' + getMonthName(monthKey) + ' ===\n'];
+      if (profile.isComplete()) {
+        lines.push('พนักงาน: ' + profile.fullName + ' (' + profile.employeeId + ')');
+        lines.push('แผนก: ' + profile.department);
+      }
+      lines.push('');
+      records.forEach(function (record) {
+        const dayOfWeek = parseDateKey(record.date).toLocaleDateString('th-TH', { weekday: 'short' });
+        const shiftLabel = record.isNonWorkStatus() ? getStatusLabel(record.status) : record.isHolidayOff() ? getShiftLabel(ShiftType.HOLIDAY) : getShiftLabel(record.shiftType);
+        lines.push(formatDisplayDate(record.date) + ' (' + dayOfWeek + ')');
+        lines.push('  กะ: ' + shiftLabel);
+        if (record.hasCheckIn()) lines.push('  เข้า: ' + record.checkIn);
+        if (record.hasCheckOut()) lines.push('  ออก: ' + record.checkOut);
+        if (record.lateMinutes > 0) lines.push('  สาย: ' + record.lateMinutes + ' นาที');
+        if (record.hasCompleteWorkTime()) {
+          const duration = calculateDuration(record.checkIn, record.checkOut);
+          lines.push('  ชั่วโมง: ' + duration);
+          lines.push('  รายได้: ' + formatMoney(calculatePay(record, profile)));
+        }
+        if (record.note) lines.push('  โน้ต: ' + record.note);
+        lines.push('');
+      });
+      const summary = calculatePeriodSummary({startKey: records[0].date, endKey: records[records.length - 1].date}, 0, records, profile);
+      lines.push('--- สรุป ---');
+      lines.push('วันทำงาน: ' + summary.workDays);
+      lines.push('ชั่วโมง: ' + formatHours(summary.hours));
+      lines.push('รายได้ทั้งหมด: ' + formatMoney(summary.total));
+      showToast('ดูรายละเอียดแล้ว');
     }
 
     let uploadedPreviewUrl = null;
@@ -1574,6 +1667,7 @@
 
     async function refreshDocuments() {
       populateMonthSelect('uploadMonthSelect');
+      populateMonthSelect('previewMonthSelect');
       const monthKey = $('uploadMonthSelect').value;
       state.selectedUploadMonth = monthKey;
 
@@ -1626,7 +1720,26 @@
       populateMonthSelect('uploadPageMonthSelect');
       const monthKey = $('uploadPageMonthSelect').value;
       state.selectedUploadMonth = monthKey;
+
+      const list = $('uploadPageDocumentsList');
+      list.innerHTML = '';
       try {
+        const all = await TimesheetDB.getAll();
+        all.sort(function (a, b) { return b.monthKey.localeCompare(a.monthKey); });
+        $('emptyUploadPageDocuments').classList.toggle('hidden', all.length > 0);
+        all.forEach(function (item) {
+          const li = document.createElement('li');
+          li.className = 'history-item';
+          const label = item.monthKey.split('-');
+          const monthLabel = formatMonthYear(parseInt(label[0], 10), parseInt(label[1], 10) - 1);
+          li.innerHTML = '<p class="date">' + monthLabel + '</p><p class="muted">' + item.filename + '</p>';
+          li.addEventListener('click', function () {
+            $('uploadPageMonthSelect').value = item.monthKey;
+            state.selectedUploadMonth = item.monthKey;
+            showUploadedFilePage(item);
+          });
+          list.appendChild(li);
+        });
         const current = await TimesheetDB.get(monthKey);
         if (current) showUploadedFilePage(current);
         else showUploadedFilePage(null);
@@ -1662,6 +1775,9 @@
         profileLines.push('พนักงาน: ' + (profile.employeeId || '-') + ' | ' + profile.fullName);
         profileLines.push('แผนก: ' + (profile.department || '-'));
         profileLines.push('วันเริ่มงาน: ' + formatDisplayDate(profile.startDate));
+        if (profile.scheduleType === '4off2' && profile.startDate4Off2) {
+          profileLines.push('วันเริ่ม 4 หยุด 2: ' + formatDisplayDate(profile.startDate4Off2));
+        }
         profileLines.push('ตารางงาน: ' + (profile.scheduleType === '4off2' ? '4 หยุด 2' : '5 หยุด 2 (3 กะ)'));
       } else {
         profileLines.push('ยังไม่ตั้งค่าโปรไฟล์');
@@ -1803,6 +1919,11 @@
     $('btnUploadPageUpload').addEventListener('click', uploadTimesheetPage);
     $('btnUploadPageDelete').addEventListener('click', deleteTimesheetPage);
     $('btnBackToDocuments').addEventListener('click', function () { navigate('documents'); });
+    $('btnPreviewLoadPdf').addEventListener('click', previewLoadPdf);
+    $('btnPreviewShowDetails').addEventListener('click', previewShowDetails);
+    $('previewMonthSelect').addEventListener('change', function () {
+      state.selectedUploadMonth = $('previewMonthSelect').value;
+    });
     $('btnExportMonthPdf').addEventListener('click', exportMonthAsPdf);
     $('btnExportMonthJson').addEventListener('click', exportMonthAsJson);
     $('btnImportMonthJson').addEventListener('click', promptJsonImport);
