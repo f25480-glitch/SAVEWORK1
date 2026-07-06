@@ -44,6 +44,10 @@
     ShiftType.HOLIDAY_AFTERNOON_2200, ShiftType.HOLIDAY_AFTERNOON_OT,
     ShiftType.HOLIDAY_NIGHT_0530, ShiftType.HOLIDAY_NIGHT_0800,
   ];
+  const SHIFT_ALLOWANCE_NIGHT_SHIFTS = [
+    ShiftType.NIGHT, ShiftType.NIGHT_OT, ShiftType.YOUNG,
+    ShiftType.HOLIDAY_NIGHT_0530, ShiftType.HOLIDAY_NIGHT_0800,
+  ];
 
   const NIGHT_MEAL_SHIFTS = [ShiftType.NIGHT, ShiftType.YOUNG, ShiftType.HOLIDAY_NIGHT_0530];
   const NIGHT_OT_MILK_SHIFTS = [ShiftType.NIGHT_OT, ShiftType.HOLIDAY_NIGHT_0800];
@@ -109,20 +113,34 @@
       this.lastName = data.lastName || '';
       this.department = data.department || '';
       this.startDate = data.startDate || '';
+      this.startDate5Off2 = data.startDate5Off2 || '';
       this.startDate4Off2 = data.startDate4Off2 || '';
       this.scheduleType = data.scheduleType || '5off2';
     }
     get fullName() { return (this.firstName + ' ' + this.lastName).trim(); }
     isComplete() { return this.startDate.length > 0; }
+    getEffectiveScheduleType() {
+      if (this.startDate4Off2) return '4off2';
+      if (this.startDate5Off2) return '5off2';
+      return this.scheduleType || '5off2';
+    }
+    getActiveScheduleStartDate() {
+      const effectiveType = this.getEffectiveScheduleType();
+      if (effectiveType === '4off2' && this.startDate4Off2) return this.startDate4Off2;
+      if (effectiveType === '5off2' && this.startDate5Off2) return this.startDate5Off2;
+      return '';
+    }
+    hasActiveScheduleStartDate() {
+      return this.getActiveScheduleStartDate().length > 0;
+    }
     getScheduleStartDate() {
-      if (this.scheduleType === '4off2' && this.startDate4Off2) return this.startDate4Off2;
-      return this.startDate;
+      return this.getActiveScheduleStartDate() || this.startDate;
     }
     toJSON() {
       return {
         employeeId: this.employeeId, firstName: this.firstName, lastName: this.lastName,
-        department: this.department, startDate: this.startDate, startDate4Off2: this.startDate4Off2,
-        scheduleType: this.scheduleType,
+        department: this.department, startDate: this.startDate, startDate5Off2: this.startDate5Off2,
+        startDate4Off2: this.startDate4Off2, scheduleType: this.scheduleType,
       };
     }
     static fromJSON(obj) { return new EmployeeProfile(obj); }
@@ -203,7 +221,8 @@
 
   function getPayPeriodForDate(profile, dateKey) {
     if (!profile || !profile.startDate) return null;
-    const periods = getPayPeriods(profile.startDate, parseDateKey(dateKey));
+    const startDateKey = profile.getScheduleStartDate ? profile.getScheduleStartDate() : profile.startDate;
+    const periods = getPayPeriods(startDateKey, parseDateKey(dateKey));
     for (let i = 0; i < periods.length; i++) {
       const p = periods[i];
       if (dateKey >= p.startKey && dateKey <= p.endKey) return p;
@@ -219,8 +238,9 @@
   }
 
   function is4Off2RestDay(dateKey, profile) {
-    if (!profile || profile.scheduleType !== '4off2') return false;
-    const scheduleStartDate = profile.getScheduleStartDate ? profile.getScheduleStartDate() : profile.startDate;
+    const effectiveType = profile && profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : (profile ? profile.scheduleType : '');
+    if (!profile || effectiveType !== '4off2') return false;
+    const scheduleStartDate = profile.getActiveScheduleStartDate ? profile.getActiveScheduleStartDate() : '';
     if (!scheduleStartDate) return false;
     const dayIndex = daysBetween(scheduleStartDate, dateKey);
     if (dayIndex < 0) return false;
@@ -380,18 +400,22 @@
       return ShiftType.MORNING;
     },
 
-    getShiftAllowance(shift, profile) {
-      if (!profile || (profile.scheduleType !== '4off2' && profile.scheduleType !== '5off2')) return 0;
+    getShiftAllowance(shift, profile, dateKey) {
+      const effectiveType = profile && profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : (profile ? profile.scheduleType : '');
+      if (!profile || (effectiveType !== '4off2' && effectiveType !== '5off2')) return 0;
       if (SHIFT_ALLOWANCE_SHIFTS.indexOf(shift) < 0) return 0;
-      // 4 หยุด 2: ได้ค่ากะทั้งกะเช้า (D) และกะดึก (N,A,B,C)
+      const scheduleStart = profile.getActiveScheduleStartDate ? profile.getActiveScheduleStartDate() : '';
+      if (!scheduleStart) return 0;
+      if (dateKey && dateKey < scheduleStart) return 0;
+      if (effectiveType === '5off2') {
+        return SHIFT_ALLOWANCE_NIGHT_SHIFTS.indexOf(shift) >= 0 ? this.SHIFT_ALLOWANCE : 0;
+      }
       return this.SHIFT_ALLOWANCE;
     },
 
     getShiftAllowanceLabel(shift) {
-      if (shift === ShiftType.MORNING || shift === ShiftType.MORNING_OT
-        || shift === ShiftType.HOLIDAY_MORNING_1730 || shift === ShiftType.HOLIDAY_MORNING_2000) {
-        return 'ค่ากะเช้า (D)';
-      }
+      if (ShiftType.isHolidayWork(shift)) return 'ค่ากะทำงาน (4หยุด2/3กะ)';
+      if (shift === ShiftType.MORNING || shift === ShiftType.MORNING_OT) return 'ค่ากะเช้า (D)';
       return 'ค่ากะ';
     },
 
@@ -409,8 +433,9 @@
 
     getDailyHousingAllowance(dateKey, profile) {
       const period = getPayPeriodForDate(profile, dateKey);
-      if (!period) return 0;
-      return this.HOUSING_MONTHLY / period.daysInPeriod;
+      if (period) return this.HOUSING_MONTHLY / period.daysInPeriod;
+      const date = parseDateKey(dateKey);
+      return this.HOUSING_MONTHLY / daysInMonthOf(date);
     },
 
     calculateOtPay(record, shift) {
@@ -437,7 +462,7 @@
         special *= this.HOLIDAY_WORK_MULTIPLIER;
       }
       let total = dailyWage + special;
-      total += this.getShiftAllowance(shift, profile);
+      total += this.getShiftAllowance(shift, profile, record.date);
       total += this.getNightMealAllowance(shift);
       total += this.getNightMilkAllowance(shift, record);
       total += this.getDailyHousingAllowance(record.date, profile);
@@ -453,13 +478,14 @@
       const isHoliday = ShiftType.isHolidayWork(shift);
       const dailyWage = isHoliday ? this.DAILY_WAGE * 2 : this.DAILY_WAGE;
       const special = isHoliday ? this.SPECIAL_ALLOWANCE * 2 : this.SPECIAL_ALLOWANCE;
-      const shiftAllow = this.getShiftAllowance(shift, profile);
+      const shiftAllow = this.getShiftAllowance(shift, profile, record.date);
       const meal = this.getNightMealAllowance(shift);
       const otPay = this.calculateOtPay(record, shift);
       const milk = this.getNightMilkAllowance(shift, record);
       const housing = this.getDailyHousingAllowance(record.date, profile);
       const total = dailyWage + special + shiftAllow + meal + milk + housing + otPay;
       const lines = ['กะงาน: ' + getShiftLabel(shift)];
+      if (isHoliday) lines.push('ค่าจ้างวันหยุด: x2');
       lines.push('ค่าจ้างรายวัน: ' + formatMoney(dailyWage));
       lines.push('เงินพิเศษ: ' + formatMoney(special));
       if (shiftAllow > 0) lines.push(this.getShiftAllowanceLabel(shift) + ': ' + formatMoney(shiftAllow));
@@ -764,7 +790,7 @@
 
     function getPeriods() {
       if (!profile.isComplete()) return [];
-      return getPayPeriods(profile.startDate, new Date());
+      return getPayPeriods(profile.getScheduleStartDate(), new Date());
     }
 
     function getSelectedPeriod() {
@@ -923,9 +949,10 @@
     function refreshCalendar() {
       $('monthYear').textContent = formatMonthYear(state.calYear, state.calMonth);
       const hint = $('scheduleHint');
-      if (profile.scheduleType === '4off2' && profile.startDate) {
-        const scheduleStartDate = profile.getScheduleStartDate ? profile.getScheduleStartDate() : profile.startDate;
-        hint.textContent = '4 หยุด 2: วันหยุดตามรอบ (สีแดง) นับจาก ' + formatDisplayDate(scheduleStartDate);
+      const effectiveType = profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : profile.scheduleType;
+      const activeScheduleStartDate = profile.getActiveScheduleStartDate ? profile.getActiveScheduleStartDate() : '';
+      if (effectiveType === '4off2' && activeScheduleStartDate) {
+        hint.textContent = '4 หยุด 2: วันหยุดตามรอบ (สีแดง) นับจาก ' + formatDisplayDate(activeScheduleStartDate);
         hint.classList.remove('hidden');
       } else {
         hint.classList.add('hidden');
@@ -1158,19 +1185,24 @@
       $('profileLastName').value = profile.lastName;
       $('profileDepartment').value = profile.department;
       $('profileStartDate').value = profile.startDate;
+      $('profileStartDate5Off2').value = profile.startDate5Off2 || '';
       $('profileStartDate4Off2').value = profile.startDate4Off2 || '';
       document.querySelectorAll('input[name="scheduleType"]').forEach(function (radio) {
         radio.checked = radio.value === profile.scheduleType;
       });
       if (profile.isComplete()) {
+        const effectiveType = profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : profile.scheduleType;
         const lines = [
           'รหัส: ' + (profile.employeeId || '-'),
           'ชื่อ: ' + profile.fullName,
           'แผนก: ' + (profile.department || '-'),
           'เริ่มงาน: ' + formatDisplayDate(profile.startDate),
-          'ตาราง: ' + (profile.scheduleType === '4off2' ? '4 หยุด 2' : '5 หยุด 2 (3 กะ)'),
+          'ตาราง: ' + (effectiveType === '4off2' ? '4 หยุด 2' : '5 หยุด 2 (3 กะ)'),
         ];
-        if (profile.scheduleType === '4off2' && profile.startDate4Off2) {
+        if (effectiveType === '5off2' && profile.startDate5Off2) {
+          lines.splice(3, 0, 'เริ่ม 5 หยุด 2: ' + formatDisplayDate(profile.startDate5Off2));
+        }
+        if (effectiveType === '4off2' && profile.startDate4Off2) {
           lines.splice(3, 0, 'เริ่ม 4 หยุด 2: ' + formatDisplayDate(profile.startDate4Off2));
         }
         $('profileSummaryText').textContent = lines.join('\n');
@@ -1187,6 +1219,7 @@
       document.querySelectorAll('input[name="scheduleType"]').forEach(function (radio) {
         if (radio.checked) scheduleType = radio.value;
       });
+      const startDate5Off2 = $('profileStartDate5Off2').value;
       const startDate4Off2 = $('profileStartDate4Off2').value;
       profile = new EmployeeProfile({
         employeeId: $('profileEmployeeId').value.trim(),
@@ -1194,6 +1227,7 @@
         lastName: $('profileLastName').value.trim(),
         department: $('profileDepartment').value.trim(),
         startDate: startDate,
+        startDate5Off2: startDate5Off2,
         startDate4Off2: startDate4Off2,
         scheduleType: scheduleType,
       });
@@ -1236,35 +1270,55 @@
       });
       const profileLines = [];
       if (profile.isComplete()) {
+        const effectiveType = profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : profile.scheduleType;
         profileLines.push('พนักงาน: ' + (profile.employeeId || '-') + ' | ' + profile.fullName);
         profileLines.push('แผนก: ' + (profile.department || '-'));
         profileLines.push('วันเริ่มงาน: ' + formatDisplayDate(profile.startDate));
-        if (profile.scheduleType === '4off2' && profile.startDate4Off2) {
+        if (effectiveType === '5off2' && profile.startDate5Off2) {
+          profileLines.push('วันเริ่ม 5 หยุด 2: ' + formatDisplayDate(profile.startDate5Off2));
+        }
+        if (effectiveType === '4off2' && profile.startDate4Off2) {
           profileLines.push('วันเริ่ม 4 หยุด 2: ' + formatDisplayDate(profile.startDate4Off2));
         }
-        profileLines.push('ตารางงาน: ' + (profile.scheduleType === '4off2' ? '4 หยุด 2' : '5 หยุด 2 (3 กะ)'));
+        profileLines.push('ตารางงาน: ' + (effectiveType === '4off2' ? '4 หยุด 2' : '5 หยุด 2 (3 กะ)'));
       } else {
         profileLines.push('ยังไม่ตั้งค่าโปรไฟล์');
       }
+      const totals = {
+        workDays: 0,
+        hours: 0,
+        shiftAllowance: 0,
+        pay: 0,
+      };
+      records.forEach(function (record) {
+        if (record.hasCompleteWorkTime() && !record.isHolidayOff()) {
+          totals.workDays += 1;
+          totals.hours += toMinutesOfDay(record.checkOut) - toMinutesOfDay(record.checkIn);
+        }
+        const pay = record.hasCompleteWorkTime() ? calculatePay(record, profile) : 0;
+        totals.pay += pay;
+        totals.shiftAllowance += CompanyWagePolicy.getShiftAllowance(record.shiftType, profile, record.date);
+      });
       let html = '<div class="report-title">ใบบันทึกงาน A&S / Bosch</div>';
       html += '<div class="report-subtitle">' + getMonthName(monthKey) + '</div>';
       html += '<div class="report-summary">';
       profileLines.forEach(function (line) { html += '<p>' + line + '</p>'; });
       html += '<p>วันที่สร้าง: ' + formatDisplayDateToday() + '</p>';
       html += '</div>';
-      html += '<table><thead><tr>';
+      html += '<table class="report-table"><thead><tr>';
       html += '<th>วันที่</th><th>วัน</th><th>กะ</th><th>เข้า</th><th>ออก</th><th>สาย</th><th>ชั่วโมง</th><th>ค่ากะ</th><th>รายได้</th><th>โน้ต</th>';
       html += '</tr></thead><tbody>';
       if (records.length === 0) {
-        html += '<tr><td colspan="10" style="text-align:center; padding: 18px;">ยังไม่มีบันทึกในเดือนนี้</td></tr>';
+        html += '<tr><td colspan="10" class="empty">ยังไม่มีบันทึกในเดือนนี้</td></tr>';
       } else {
         records.forEach(function (record) {
           const shiftLabel = record.isNonWorkStatus() ? getStatusLabel(record.status) : record.isHolidayOff() ? getShiftLabel(ShiftType.HOLIDAY) : getShiftLabel(record.shiftType);
           const dayOfWeek = parseDateKey(record.date).toLocaleDateString('th-TH', { weekday: 'short' });
           const duration = record.hasCompleteWorkTime() ? calculateDuration(record.checkIn, record.checkOut) : '';
-          const shiftAllowance = CompanyWagePolicy.getShiftAllowance(record.shiftType, profile);
+          const shiftAllowance = CompanyWagePolicy.getShiftAllowance(record.shiftType, profile, record.date);
           const payText = record.hasCompleteWorkTime() ? formatMoney(calculatePay(record, profile)) : '-';
-          html += '<tr>';
+          const rowClass = record.isHolidayOff() ? 'holiday-row' : '';
+          html += '<tr class="' + rowClass + '">';
           html += '<td>' + formatDisplayDate(record.date) + '</td>';
           html += '<td>' + dayOfWeek + '</td>';
           html += '<td>' + shiftLabel + '</td>';
@@ -1274,16 +1328,29 @@
           html += '<td>' + (duration || '-') + '</td>';
           html += '<td>' + (shiftAllowance > 0 ? formatMoney(shiftAllowance) : '-') + '</td>';
           html += '<td>' + payText + '</td>';
-          html += '<td class="note-cell" style="font-size:0.8rem;">' + (record.note || '-') + '</td>';
+          html += '<td class="note-cell">' + (record.note || '-') + '</td>';
           html += '</tr>';
         });
+      }
+      if (records.length > 0) {
+        html += '<tr class="summary-row">';
+        html += '<td colspan="2">รวม</td>';
+        html += '<td>-</td>';
+        html += '<td>-</td>';
+        html += '<td>-</td>';
+        html += '<td>-</td>';
+        html += '<td>' + formatHours(totals.hours / 60) + '</td>';
+        html += '<td>' + formatMoney(totals.shiftAllowance) + '</td>';
+        html += '<td>' + formatMoney(totals.pay) + '</td>';
+        html += '<td>-</td>';
+        html += '</tr>';
       }
       html += '</tbody></table>';
       return html;
     }
 
     function exportMonthAsJson() {
-      const monthKey = $('uploadMonthSelect').value;
+      const monthKey = $('exportMonthSelect').value;
       const payload = {
         monthKey: monthKey,
         generatedAt: new Date().toISOString(),
@@ -1301,16 +1368,20 @@
     }
 
     function exportMonthAsPdf() {
-      const monthKey = $('uploadMonthSelect').value;
+      const monthKey = $('exportMonthSelect').value;
       const html = '<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><title>ใบบันทึกงาน ' + getMonthName(monthKey) + '</title><style>' +
         'body{font-family:Arial,Helvetica,sans-serif;margin:0;padding:24px;color:#1a1a2e;background:#fff;}' +
         '.report-title{font-size:1.5rem;font-weight:700;margin-bottom:16px;}' +
         '.report-subtitle{color:#64748b;font-size:1.125rem;margin-bottom:16px;}' +
-        '.report-summary p{margin:0 0 8px;}' +
-        'table{width:100%;border-collapse:collapse;margin-top:16px;}' +
-        'th,td{border:1px solid #cbd5e1;padding:10px 12px;text-align:left;vertical-align:top;font-size:0.9rem;}' +
-        'th{background:#f8fafc;}' +
+        '.report-summary{margin-bottom:18px;}' +
+        '.report-summary p{margin:0 0 6px;}' +
+        '.report-table{width:100%;border-collapse:collapse;margin-top:16px;font-size:0.83rem;}' +
+        '.report-table th,.report-table td{border:1px solid #cbd5e1;padding:8px 10px;text-align:left;vertical-align:middle;}' +
+        '.report-table th{background:#f8fafc;font-weight:700;}' +
+        '.report-table .holiday-row{background:#eaf8ff;}' +
+        '.report-table .summary-row{font-weight:700;background:#f3f4f6;}' +
         '.note-cell{white-space:pre-wrap;}' +
+        '.empty{text-align:center;padding:18px;}' +
         '</style></head><body>' + buildMonthReportHtml(monthKey) + '</body></html>';
       const popup = window.open('', '_blank');
       if (!popup) {
@@ -1668,6 +1739,7 @@
     async function refreshDocuments() {
       populateMonthSelect('uploadMonthSelect');
       populateMonthSelect('previewMonthSelect');
+      populateMonthSelect('exportMonthSelect');
       const monthKey = $('uploadMonthSelect').value;
       state.selectedUploadMonth = monthKey;
 
@@ -1772,13 +1844,17 @@
       });
       const profileLines = [];
       if (profile.isComplete()) {
+        const effectiveType = profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : profile.scheduleType;
         profileLines.push('พนักงาน: ' + (profile.employeeId || '-') + ' | ' + profile.fullName);
         profileLines.push('แผนก: ' + (profile.department || '-'));
         profileLines.push('วันเริ่มงาน: ' + formatDisplayDate(profile.startDate));
-        if (profile.scheduleType === '4off2' && profile.startDate4Off2) {
+        if (effectiveType === '5off2' && profile.startDate5Off2) {
+          profileLines.push('วันเริ่ม 5 หยุด 2: ' + formatDisplayDate(profile.startDate5Off2));
+        }
+        if (effectiveType === '4off2' && profile.startDate4Off2) {
           profileLines.push('วันเริ่ม 4 หยุด 2: ' + formatDisplayDate(profile.startDate4Off2));
         }
-        profileLines.push('ตารางงาน: ' + (profile.scheduleType === '4off2' ? '4 หยุด 2' : '5 หยุด 2 (3 กะ)'));
+        profileLines.push('ตารางงาน: ' + (effectiveType === '4off2' ? '4 หยุด 2' : '5 หยุด 2 (3 กะ)'));
       } else {
         profileLines.push('ยังไม่ตั้งค่าโปรไฟล์');
       }
@@ -1924,10 +2000,16 @@
     $('previewMonthSelect').addEventListener('change', function () {
       state.selectedUploadMonth = $('previewMonthSelect').value;
     });
+    $('exportMonthSelect').addEventListener('change', function () {
+      state.selectedUploadMonth = $('exportMonthSelect').value;
+    });
     $('btnExportMonthPdf').addEventListener('click', exportMonthAsPdf);
     $('btnExportMonthJson').addEventListener('click', exportMonthAsJson);
     $('btnImportMonthJson').addEventListener('click', promptJsonImport);
     $('jsonImportFile').addEventListener('change', handleJsonImport);
+    $('btnDownloadApp').addEventListener('click', function () {
+      window.open('https://drive.google.com/drive/folders/1vuZXn3BVvDieKe2sbm-2l60Nuvs7eIAK?usp=drive_link', '_blank');
+    });
     $('btnBack').addEventListener('click', function () {
       if (state.view === 'documentsUpload') navigate('documents');
       else navigate('calendar');
