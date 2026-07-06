@@ -795,7 +795,13 @@
 
     function getPeriods() {
       if (!profile.isComplete()) return [];
-      return getPayPeriods(profile.getScheduleStartDate(), new Date());
+      const selectedStartType = $('homeStartDateType') ? $('homeStartDateType').value : profile.activeStartDateType || 'startDate';
+      const startDate = selectedStartType === 'startDate5Off2'
+        ? profile.startDate5Off2 || profile.startDate
+        : selectedStartType === 'startDate4Off2'
+          ? profile.startDate4Off2 || profile.startDate
+          : profile.startDate;
+      return getPayPeriods(startDate, new Date());
     }
 
     function getSelectedPeriod() {
@@ -2047,6 +2053,10 @@
     });
     $('periodSelect').addEventListener('change', function () {
       state.selectedPeriodIndex = parseInt($('periodSelect').value, 10);
+      refreshHome();
+    });
+    $('homeStartDateType').addEventListener('change', function () {
+      state.selectedPeriodIndex = -1;
       refreshHome();
     });
     $('statusSelect').addEventListener('change', function () {
