@@ -34,7 +34,7 @@
 
 *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
 
-html,body{ height:100%; }
+html,body{ height:100%; overflow-x:hidden; }
 
 body{
   margin:0;
@@ -48,6 +48,8 @@ body{
   padding-top:64px;
   padding-bottom:calc(72px + env(safe-area-inset-bottom));
   min-height:100%;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
 }
 
 h1,h2{ font-family:var(--font-head); margin:0; color:var(--ink); }
@@ -92,7 +94,7 @@ h1,h2{ font-family:var(--font-head); margin:0; color:var(--ink); }
 /* ---------------------------------------------------------------------- */
 /* Layout                                                                  */
 /* ---------------------------------------------------------------------- */
-#app{ max-width:520px; margin:0 auto; padding:16px 16px 4px; }
+#app{ max-width:520px; margin:0 auto; padding:16px 16px calc(100px + env(safe-area-inset-bottom)); }
 .view{ display:none; animation:viewIn .22s ease; }
 .view.active{ display:block; }
 @keyframes viewIn{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;} }
@@ -394,8 +396,6 @@ fieldset.field{ border:none; padding:0; margin:0 0 14px; }
   z-index:60; animation:toastIn .2s ease;
 }
 @keyframes toastIn{ from{opacity:0; transform:translate(-50%,8px);} to{opacity:1; transform:translate(-50%,0);} }
-
-.export-sheet{ }
 
 /* ---------------------------------------------------------------------- */
 /* Scrollbar & focus                                                       */
