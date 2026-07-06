@@ -33,7 +33,7 @@
     ShiftType.HOLIDAY_AFTERNOON_OT, ShiftType.HOLIDAY_NIGHT_0530, ShiftType.HOLIDAY_NIGHT_0800,
   ];
 
-  // D, N, A, B, C (+ OT ของแต่ละกะ) — 3 กะ และ 4 หยุด 2 ได้ค่ากะ 165/วัน
+  // D, N, A, B, C (+ OT ของแต่ละกะ) — 5 หยุด 2 และ 4 หยุด 2 ได้ค่ากะดึก 165 บาท/วัน
   const SHIFT_ALLOWANCE_SHIFTS = [
     ShiftType.MORNING, ShiftType.MORNING_OT,           // D กะเช้า
     ShiftType.EARLY,                                   // A
@@ -49,7 +49,7 @@
     ShiftType.HOLIDAY_NIGHT_0530, ShiftType.HOLIDAY_NIGHT_0800,
   ];
 
-  const NIGHT_MEAL_SHIFTS = [ShiftType.NIGHT, ShiftType.YOUNG, ShiftType.HOLIDAY_NIGHT_0530];
+  const NIGHT_MEAL_SHIFTS = [ShiftType.NIGHT, ShiftType.NIGHT_OT, ShiftType.YOUNG, ShiftType.HOLIDAY_NIGHT_0530, ShiftType.HOLIDAY_NIGHT_0800];
   const NIGHT_OT_MILK_SHIFTS = [ShiftType.NIGHT_OT, ShiftType.HOLIDAY_NIGHT_0800];
 
   function getShiftLabel(shiftType) { return SHIFT_LABELS[shiftType] || SHIFT_LABELS.auto; }
@@ -115,6 +115,7 @@
       this.startDate = data.startDate || '';
       this.startDate5Off2 = data.startDate5Off2 || '';
       this.startDate4Off2 = data.startDate4Off2 || '';
+      this.activeStartDateType = data.activeStartDateType || 'startDate';
       this.scheduleType = data.scheduleType || '5off2';
     }
     get fullName() { return (this.firstName + ' ' + this.lastName).trim(); }
@@ -133,14 +134,20 @@
     hasActiveScheduleStartDate() {
       return this.getActiveScheduleStartDate().length > 0;
     }
+    getSelectedScheduleStartDate() {
+      if (this.activeStartDateType === 'startDate4Off2' && this.startDate4Off2) return this.startDate4Off2;
+      if (this.activeStartDateType === 'startDate5Off2' && this.startDate5Off2) return this.startDate5Off2;
+      return this.startDate;
+    }
     getScheduleStartDate() {
-      return this.getActiveScheduleStartDate() || this.startDate;
+      return this.getSelectedScheduleStartDate();
     }
     toJSON() {
       return {
         employeeId: this.employeeId, firstName: this.firstName, lastName: this.lastName,
         department: this.department, startDate: this.startDate, startDate5Off2: this.startDate5Off2,
-        startDate4Off2: this.startDate4Off2, scheduleType: this.scheduleType,
+        startDate4Off2: this.startDate4Off2, activeStartDateType: this.activeStartDateType,
+        scheduleType: this.scheduleType,
       };
     }
     static fromJSON(obj) { return new EmployeeProfile(obj); }
@@ -403,18 +410,16 @@
     getShiftAllowance(shift, profile, dateKey) {
       const effectiveType = profile && profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : (profile ? profile.scheduleType : '');
       if (!profile || (effectiveType !== '4off2' && effectiveType !== '5off2')) return 0;
-      if (SHIFT_ALLOWANCE_SHIFTS.indexOf(shift) < 0) return 0;
-      const scheduleStart = profile.getActiveScheduleStartDate ? profile.getActiveScheduleStartDate() : '';
-      if (!scheduleStart) return 0;
-      if (dateKey && dateKey < scheduleStart) return 0;
       if (effectiveType === '5off2') {
         return SHIFT_ALLOWANCE_NIGHT_SHIFTS.indexOf(shift) >= 0 ? this.SHIFT_ALLOWANCE : 0;
       }
+      if (SHIFT_ALLOWANCE_SHIFTS.indexOf(shift) < 0) return 0;
       return this.SHIFT_ALLOWANCE;
     },
 
     getShiftAllowanceLabel(shift) {
-      if (ShiftType.isHolidayWork(shift)) return 'ค่ากะทำงาน (4หยุด2/3กะ)';
+      if (ShiftType.isHolidayWork(shift)) return 'ค่ากะทำงาน (5หยุด2/4หยุด2)';
+      if (SHIFT_ALLOWANCE_NIGHT_SHIFTS.indexOf(shift) >= 0) return 'ค่ากะดึก 165 บาท/วัน';
       if (shift === ShiftType.MORNING || shift === ShiftType.MORNING_OT) return 'ค่ากะเช้า (D)';
       return 'ค่ากะ';
     },
@@ -884,15 +889,20 @@
         $('totalDiligence').textContent = formatMoney(summary.diligence);
         $('totalWage').textContent = formatMoney(summary.total);
         $('periodInfo').textContent = formatPeriodLabel(period) + ' | ' + period.daysInPeriod + ' วัน/รอบ';
+        const today = todayDateKey();
+        const isCurrentPeriod = today >= period.startKey && today <= period.endKey;
         const breakdown = [
           'ค่าจ้าง+เบี้ย+OT+กะ: ' + formatMoney(summary.dailyPay - summary.housing),
           'ค่าเช่าบ้าน: ' + formatMoney(summary.housing),
           'เบี้ยขยัน: ' + formatMoney(summary.diligence),
         ];
-        if (summary.diligence === 0 && todayDateKey() >= period.endKey) {
+        if (summary.diligence === 0 && today >= period.endKey) {
           breakdown.push('(ไม่ได้เบี้ยขยัน: มีลา/ขาด/ป่วย/สาย หรือรอบยังไม่ครบ)');
         } else if (summary.diligence === 0) {
           breakdown.push('(เบี้ยขยันจะคำนวณเมื่อครบรอบ ' + period.daysInPeriod + ' วัน)');
+        }
+        if (isCurrentPeriod) {
+          breakdown.push('(ยอดสะสมของรอบนี้จะไม่รีเซ็ตจนกว่าจะครบ ' + period.daysInPeriod + ' วัน)');
         }
         $('periodBreakdown').textContent = breakdown.join('\n');
         $('periodBreakdown').classList.remove('hidden');
@@ -1187,6 +1197,11 @@
       $('profileStartDate').value = profile.startDate;
       $('profileStartDate5Off2').value = profile.startDate5Off2 || '';
       $('profileStartDate4Off2').value = profile.startDate4Off2 || '';
+      document.querySelectorAll('#profileStartDateType option').forEach(function (option) {
+        option.disabled = option.value !== 'startDate' && !profile[option.value];
+      });
+      $('profileStartDateType').value = profile.activeStartDateType && profile[profile.activeStartDateType]
+        ? profile.activeStartDateType : 'startDate';
       document.querySelectorAll('input[name="scheduleType"]').forEach(function (radio) {
         radio.checked = radio.value === profile.scheduleType;
       });
@@ -1229,6 +1244,7 @@
         startDate: startDate,
         startDate5Off2: startDate5Off2,
         startDate4Off2: startDate4Off2,
+        activeStartDateType: $('profileStartDateType').value,
         scheduleType: scheduleType,
       });
       profileStorage.save(profile);
