@@ -52,11 +52,15 @@
   const NIGHT_MEAL_SHIFTS = [ShiftType.NIGHT, ShiftType.NIGHT_OT, ShiftType.YOUNG, ShiftType.HOLIDAY_NIGHT_0530, ShiftType.HOLIDAY_NIGHT_0800];
   const NIGHT_OT_MILK_SHIFTS = [ShiftType.NIGHT_OT, ShiftType.HOLIDAY_NIGHT_0800];
 
+  function $(id) {
+    return typeof id === 'string' ? document.getElementById(id) : id;
+  }
+
   function getShiftLabel(shiftType) { return SHIFT_LABELS[shiftType] || SHIFT_LABELS.auto; }
   function getStatusLabel(status) { return STATUS_LABELS[status] || status; }
 
   class WorkDayRecord {
-    constructor(date, checkIn, checkOut, note, shiftType, status, lateMinutes) {
+    constructor(date, checkIn, checkOut, note, shiftType, status, lateMinutes, scheduleMode) {
       this.date = date;
       this.checkIn = checkIn || '';
       this.checkOut = checkOut || '';
@@ -64,6 +68,7 @@
       this.shiftType = shiftType && shiftType.length > 0 ? shiftType : ShiftType.AUTO;
       this.status = status || DayStatus.WORK;
       this.lateMinutes = lateMinutes || 0;
+      this.scheduleMode = scheduleMode || '';
     }
     hasCheckIn() { return this.checkIn.length > 0; }
     hasCheckOut() { return this.checkOut.length > 0; }
@@ -95,12 +100,14 @@
       return {
         date: this.date, checkIn: this.checkIn, checkOut: this.checkOut, note: this.note,
         shiftType: this.shiftType, status: this.status, lateMinutes: this.lateMinutes,
+        scheduleMode: this.scheduleMode,
       };
     }
     static fromJSON(obj) {
       return new WorkDayRecord(
         obj.date, obj.checkIn || '', obj.checkOut || '', obj.note || '',
-        obj.shiftType || ShiftType.AUTO, obj.status || DayStatus.WORK, obj.lateMinutes || 0
+        obj.shiftType || ShiftType.AUTO, obj.status || DayStatus.WORK, obj.lateMinutes || 0,
+        obj.scheduleMode || ''
       );
     }
   }
@@ -395,6 +402,16 @@
     return 0;
   }
 
+  function resolveScheduleMode(profile, record) {
+    if (record && record.scheduleMode && (record.scheduleMode === '4off2' || record.scheduleMode === '5off2')) {
+      return record.scheduleMode;
+    }
+    if (profile && profile.getEffectiveScheduleType) {
+      return profile.getEffectiveScheduleType();
+    }
+    return profile && profile.scheduleType === '4off2' ? '4off2' : '5off2';
+  }
+
   const CompanyWagePolicy = {
     DAILY_WAGE: 400,
     SPECIAL_ALLOWANCE: 12.5,
@@ -429,8 +446,8 @@
       return ShiftType.MORNING;
     },
 
-    getShiftAllowance(shift, profile, dateKey) {
-      const effectiveType = profile && profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : (profile ? profile.scheduleType : '');
+    getShiftAllowance(shift, profile, dateKey, record) {
+      const effectiveType = resolveScheduleMode(profile, record);
       if (!profile || (effectiveType !== '4off2' && effectiveType !== '5off2')) return 0;
       if (effectiveType === '5off2') {
         return SHIFT_ALLOWANCE_NIGHT_SHIFTS.indexOf(shift) >= 0 ? this.SHIFT_ALLOWANCE : 0;
@@ -441,8 +458,8 @@
       return 0;
     },
 
-    getShiftAllowanceLabel(shift, profile) {
-      const effectiveType = profile && profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : (profile ? profile.scheduleType : '');
+    getShiftAllowanceLabel(shift, profile, record) {
+      const effectiveType = resolveScheduleMode(profile, record);
       if (ShiftType.isHolidayWork(shift)) return 'ค่ากะทำงาน (5หยุด2/4หยุด2)';
       if (effectiveType === '5off2') {
         return SHIFT_ALLOWANCE_NIGHT_SHIFTS.indexOf(shift) >= 0 ? 'ค่ากะดึก 165 บาท/วัน' : 'ค่ากะ';
@@ -495,7 +512,7 @@
         special *= this.HOLIDAY_WORK_MULTIPLIER;
       }
       let total = dailyWage + special;
-      total += this.getShiftAllowance(shift, profile, record.date);
+      total += this.getShiftAllowance(shift, profile, record.date, record);
       total += this.getNightMealAllowance(shift);
       total += this.getNightMilkAllowance(shift, record);
       total += this.getDailyHousingAllowance(record.date, profile);
@@ -511,7 +528,7 @@
       const isHoliday = ShiftType.isHolidayWork(shift);
       const dailyWage = isHoliday ? this.DAILY_WAGE * 2 : this.DAILY_WAGE;
       const special = isHoliday ? this.SPECIAL_ALLOWANCE * 2 : this.SPECIAL_ALLOWANCE;
-      const shiftAllow = this.getShiftAllowance(shift, profile, record.date);
+      const shiftAllow = this.getShiftAllowance(shift, profile, record.date, record);
       const meal = this.getNightMealAllowance(shift);
       const otPay = this.calculateOtPay(record, shift);
       const milk = this.getNightMilkAllowance(shift, record);
@@ -521,7 +538,7 @@
       if (isHoliday) lines.push('ค่าจ้างวันหยุด: x2');
       lines.push('ค่าจ้างรายวัน: ' + formatMoney(dailyWage));
       lines.push('เงินพิเศษ: ' + formatMoney(special));
-      if (shiftAllow > 0) lines.push(this.getShiftAllowanceLabel(shift, profile) + ': ' + formatMoney(shiftAllow));
+      if (shiftAllow > 0) lines.push(this.getShiftAllowanceLabel(shift, profile, record) + ': ' + formatMoney(shiftAllow));
       if (meal > 0) lines.push('ค่าข้าวกะดึก: ' + formatMoney(meal));
       if (milk > 0) lines.push('ค่านมกะดึก (OT): ' + formatMoney(milk));
       if (housing > 0) lines.push('ค่าเช่าบ้าน (รายวัน): ' + formatMoney(housing));
@@ -799,13 +816,16 @@
       selectedDateKey: todayDateKey(),
       selectedPeriodIndex: -1,
       selectedUploadMonth: '',
+      dayDetailScheduleMode: profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : (profile.scheduleType || '5off2'),
     };
 
-    function $(id) { return document.getElementById(id); }
-
     const views = {
-      home: $('viewHome'), calendar: $('viewCalendar'), dayDetail: $('viewDayDetail'),
-      profile: $('viewProfile'), documents: $('viewDocuments'), documentsUpload: $('viewDocumentsUpload'), info: $('viewInfo'),
+      home: $('viewHome'),
+      calendar: $('viewCalendar'),
+      dayDetail: $('viewDayDetail'),
+      profile: $('viewProfile'),
+      documents: $('viewDocuments'),
+      documentsUpload: $('viewDocumentsUpload'),
     };
 
     const titles = {
@@ -1090,6 +1110,11 @@
       if (!dateKey) return;
       $('dayDetailDate').textContent = formatDisplayDate(dateKey);
       const record = storage.getRecordForDate(dateKey);
+      if (record && record.scheduleMode) {
+        state.dayDetailScheduleMode = record.scheduleMode;
+      } else if (!state.dayDetailScheduleMode) {
+        state.dayDetailScheduleMode = profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : (profile.scheduleType || '5off2');
+      }
       if (record) {
         $('statusSelect').value = record.status || DayStatus.WORK;
         $('editCheckIn').value = toTimeInputValue(record.checkIn);
@@ -1117,7 +1142,7 @@
       const checkIn = $('editCheckIn').value || '';
       const checkOut = $('editCheckOut').value || '';
       const late = parseInt($('editLate').value, 10) || 0;
-      return new WorkDayRecord(dateKey, checkIn, checkOut, '', shift, status, late);
+      return new WorkDayRecord(dateKey, checkIn, checkOut, '', shift, status, late, state.dayDetailScheduleMode);
     }
 
     function updatePreview() {
@@ -1184,7 +1209,7 @@
       const status = $('statusSelect').value;
       const note = $('editNote').value.trim();
       if (status !== DayStatus.WORK) {
-        storage.saveRecord(new WorkDayRecord(dateKey, '', '', note, ShiftType.AUTO, status, 0));
+        storage.saveRecord(new WorkDayRecord(dateKey, '', '', note, ShiftType.AUTO, status, 0, state.dayDetailScheduleMode));
         showToast('บันทึกข้อมูลแล้ว');
         updateSavedPreview();
         updatePreview();
@@ -1195,7 +1220,7 @@
       const checkOut = $('editCheckOut').value || '';
       const late = parseInt($('editLate').value, 10) || 0;
       if (shift === ShiftType.HOLIDAY) {
-        storage.saveRecord(new WorkDayRecord(dateKey, '', '', note, shift, DayStatus.HOLIDAY, 0));
+        storage.saveRecord(new WorkDayRecord(dateKey, '', '', note, shift, DayStatus.HOLIDAY, 0, state.dayDetailScheduleMode));
         showToast('บันทึกข้อมูลแล้ว');
         updateSavedPreview();
         return;
@@ -1205,7 +1230,7 @@
         showToast('เวลาออกงานต้องหลังเวลาเข้างาน');
         return;
       }
-      storage.saveRecord(new WorkDayRecord(dateKey, checkIn, checkOut, note, shift, DayStatus.WORK, late));
+      storage.saveRecord(new WorkDayRecord(dateKey, checkIn, checkOut, note, shift, DayStatus.WORK, late, state.dayDetailScheduleMode));
       showToast('บันทึกข้อมูลแล้ว');
       updateSavedPreview();
       updatePreview();
@@ -1606,6 +1631,9 @@
       const preview = $('uploadPreview');
       const previewCard = $('uploadPreviewCard');
       const fileNameEl = $('uploadFileName');
+      if (!preview || !previewCard || !fileNameEl) {
+        return;
+      }
       if (!item) {
         clearUploadPreviewUrl();
         preview.innerHTML = '';
@@ -1656,6 +1684,9 @@
       const preview = $('uploadPagePreview');
       const previewCard = $('uploadPagePreviewCard');
       const fileNameEl = $('uploadPageFileName');
+      if (!preview || !previewCard || !fileNameEl) {
+        return;
+      }
       if (!item) {
         clearUploadPreviewUrl();
         preview.innerHTML = '';
@@ -1797,11 +1828,16 @@
       state.selectedUploadMonth = monthKey;
 
       const list = $('documentsList');
-      list.innerHTML = '';
+      if (list) {
+        list.innerHTML = '';
+      }
       try {
         const all = await TimesheetDB.getAll();
         all.sort(function (a, b) { return b.monthKey.localeCompare(a.monthKey); });
-        $('emptyDocuments').classList.toggle('hidden', all.length > 0);
+        const emptyEl = $('emptyDocuments');
+        if (emptyEl) {
+          emptyEl.classList.toggle('hidden', all.length > 0);
+        }
         all.forEach(function (item) {
           const li = document.createElement('li');
           li.className = 'history-item';
@@ -1813,13 +1849,18 @@
             state.selectedUploadMonth = item.monthKey;
             showUploadedFile(item);
           });
-          list.appendChild(li);
+          if (list) {
+            list.appendChild(li);
+          }
         });
         const current = await TimesheetDB.get(monthKey);
         if (current) showUploadedFile(current);
         else {
           clearUploadPreviewUrl();
-          $('uploadPreviewCard').classList.add('hidden');
+          const uploadPreviewCard = $('uploadPreviewCard');
+          if (uploadPreviewCard) {
+            uploadPreviewCard.classList.add('hidden');
+          }
         }
       } catch (e) {
         showToast('ไม่สามารถโหลดเอกสารได้');
@@ -1827,8 +1868,9 @@
 
       const preview = $('documentsPreview');
       const records = getMonthRecords(monthKey);
+      const previewCard = $('documentsPreviewCard');
       if (records.length === 0) {
-        $('documentsPreviewCard').classList.add('hidden');
+        if (previewCard) previewCard.classList.add('hidden');
       } else {
         const lines = records.map(function (record) {
           const shiftLabel = record.isNonWorkStatus() ? getStatusLabel(record.status) : record.isHolidayOff() ? getShiftLabel(ShiftType.HOLIDAY) : getShiftLabel(record.shiftType);
@@ -1836,8 +1878,8 @@
           const payText = record.hasCompleteWorkTime() ? formatMoney(calculatePay(record, profile)) : '-';
           return formatDisplayDate(record.date) + ' | ' + shiftLabel + ' | ' + (record.checkIn || '-') + ' - ' + (record.checkOut || '-') + ' | ' + duration + ' | ' + payText + '\n' + (record.note || '');
         });
-        preview.textContent = 'เดือน: ' + getMonthName(monthKey) + '\n\n' + lines.join('\n\n');
-        $('documentsPreviewCard').classList.remove('hidden');
+        if (preview) preview.textContent = 'เดือน: ' + getMonthName(monthKey) + '\n\n' + lines.join('\n\n');
+        if (previewCard) previewCard.classList.remove('hidden');
       }
     }
 
@@ -1847,11 +1889,16 @@
       state.selectedUploadMonth = monthKey;
 
       const list = $('uploadPageDocumentsList');
-      list.innerHTML = '';
+      if (list) {
+        list.innerHTML = '';
+      }
       try {
         const all = await TimesheetDB.getAll();
         all.sort(function (a, b) { return b.monthKey.localeCompare(a.monthKey); });
-        $('emptyUploadPageDocuments').classList.toggle('hidden', all.length > 0);
+        const emptyEl = $('emptyUploadPageDocuments');
+        if (emptyEl) {
+          emptyEl.classList.toggle('hidden', all.length > 0);
+        }
         all.forEach(function (item) {
           const li = document.createElement('li');
           li.className = 'history-item';
@@ -1863,7 +1910,9 @@
             state.selectedUploadMonth = item.monthKey;
             showUploadedFilePage(item);
           });
-          list.appendChild(li);
+          if (list) {
+            list.appendChild(li);
+          }
         });
         const current = await TimesheetDB.get(monthKey);
         if (current) showUploadedFilePage(current);
@@ -2096,21 +2145,17 @@
       if (state.view === 'dayDetail') refreshDayDetail();
     });
     $('btnMode5Off2').addEventListener('click', function () {
-      profile.scheduleType = '5off2';
-      profile.activeStartDateType = 'startDate5Off2';
-      profileStorage.save(profile);
-      $('homeStartDateType').value = 'startDate5Off2';
+      state.dayDetailScheduleMode = '5off2';
       state.selectedPeriodIndex = -1;
+      if ($('homeStartDateType')) $('homeStartDateType').value = 'startDate5Off2';
       refreshHome();
       refreshCalendar();
       refreshDayDetail();
     });
     $('btnMode4Off2').addEventListener('click', function () {
-      profile.scheduleType = '4off2';
-      profile.activeStartDateType = 'startDate4Off2';
-      profileStorage.save(profile);
-      $('homeStartDateType').value = 'startDate4Off2';
+      state.dayDetailScheduleMode = '4off2';
       state.selectedPeriodIndex = -1;
+      if ($('homeStartDateType')) $('homeStartDateType').value = 'startDate4Off2';
       refreshHome();
       refreshCalendar();
       refreshDayDetail();
