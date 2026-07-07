@@ -33,7 +33,7 @@
     ShiftType.HOLIDAY_AFTERNOON_OT, ShiftType.HOLIDAY_NIGHT_0530, ShiftType.HOLIDAY_NIGHT_0800,
   ];
 
-  // D, N, A, B, C (+ OT ของแต่ละกะ) — 5 หยุด 2 และ 4 หยุด 2 ได้ค่ากะดึก 165 บาท/วัน
+  // D, N, A, B, C (+ OT ของแต่ละกะ) — 5 หยุด 2 ได้ค่ากะดึก 165 บาท/วัน ส่วน 4 หยุด 2 ได้ค่ากะเช้าและค่ากะดึก
   const SHIFT_ALLOWANCE_SHIFTS = [
     ShiftType.MORNING, ShiftType.MORNING_OT,           // D กะเช้า
     ShiftType.EARLY,                                   // A
@@ -121,14 +121,18 @@
     get fullName() { return (this.firstName + ' ' + this.lastName).trim(); }
     isComplete() { return this.startDate.length > 0; }
     getEffectiveScheduleType() {
-      if (this.startDate4Off2) return '4off2';
-      if (this.startDate5Off2) return '5off2';
-      return this.scheduleType || '5off2';
+      if (this.activeStartDateType === 'startDate4Off2') return '4off2';
+      if (this.activeStartDateType === 'startDate5Off2') return '5off2';
+      if (this.scheduleType === '4off2') return '4off2';
+      if (this.scheduleType === '5off2') return '5off2';
+      if (this.startDate4Off2 && !this.startDate5Off2) return '4off2';
+      if (this.startDate5Off2 && !this.startDate4Off2) return '5off2';
+      return '5off2';
     }
     getActiveScheduleStartDate() {
       const effectiveType = this.getEffectiveScheduleType();
-      if (effectiveType === '4off2' && this.startDate4Off2) return this.startDate4Off2;
-      if (effectiveType === '5off2' && this.startDate5Off2) return this.startDate5Off2;
+      if (effectiveType === '4off2') return this.startDate4Off2 || '';
+      if (effectiveType === '5off2') return this.startDate5Off2 || '';
       return '';
     }
     hasActiveScheduleStartDate() {
@@ -244,10 +248,28 @@
     return s + ' – ' + e + ' (จ่าย ' + pay + ')';
   }
 
-  function is4Off2RestDay(dateKey, profile) {
-    const effectiveType = profile && profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : (profile ? profile.scheduleType : '');
+  function getSelectedScheduleType(profile, selectedStartType) {
+    const resolvedType = selectedStartType || (profile && profile.activeStartDateType) || 'startDate';
+    if (resolvedType === 'startDate4Off2') {
+      return profile && (profile.startDate4Off2 || profile.startDate) ? '4off2' : '5off2';
+    }
+    if (resolvedType === 'startDate5Off2') {
+      return profile && (profile.startDate5Off2 || profile.startDate) ? '5off2' : '5off2';
+    }
+    return profile && profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : (profile ? profile.scheduleType : '5off2');
+  }
+
+  function getSelectedScheduleStartDate(profile, selectedStartType) {
+    const effectiveType = getSelectedScheduleType(profile, selectedStartType);
+    if (effectiveType === '4off2') return profile && (profile.startDate4Off2 || profile.startDate) ? (profile.startDate4Off2 || profile.startDate) : '';
+    if (effectiveType === '5off2') return profile && (profile.startDate5Off2 || profile.startDate) ? (profile.startDate5Off2 || profile.startDate) : '';
+    return '';
+  }
+
+  function is4Off2RestDay(dateKey, profile, selectedStartType) {
+    const effectiveType = getSelectedScheduleType(profile, selectedStartType);
     if (!profile || effectiveType !== '4off2') return false;
-    const scheduleStartDate = profile.getActiveScheduleStartDate ? profile.getActiveScheduleStartDate() : '';
+    const scheduleStartDate = getSelectedScheduleStartDate(profile, selectedStartType);
     if (!scheduleStartDate) return false;
     const dayIndex = daysBetween(scheduleStartDate, dateKey);
     if (dayIndex < 0) return false;
@@ -413,14 +435,20 @@
       if (effectiveType === '5off2') {
         return SHIFT_ALLOWANCE_NIGHT_SHIFTS.indexOf(shift) >= 0 ? this.SHIFT_ALLOWANCE : 0;
       }
-      if (SHIFT_ALLOWANCE_SHIFTS.indexOf(shift) < 0) return 0;
-      return this.SHIFT_ALLOWANCE;
+      if (effectiveType === '4off2') {
+        return SHIFT_ALLOWANCE_SHIFTS.indexOf(shift) >= 0 ? this.SHIFT_ALLOWANCE : 0;
+      }
+      return 0;
     },
 
-    getShiftAllowanceLabel(shift) {
+    getShiftAllowanceLabel(shift, profile) {
+      const effectiveType = profile && profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : (profile ? profile.scheduleType : '');
       if (ShiftType.isHolidayWork(shift)) return 'ค่ากะทำงาน (5หยุด2/4หยุด2)';
+      if (effectiveType === '5off2') {
+        return SHIFT_ALLOWANCE_NIGHT_SHIFTS.indexOf(shift) >= 0 ? 'ค่ากะดึก 165 บาท/วัน' : 'ค่ากะ';
+      }
+      if (effectiveType === '4off2' && (shift === ShiftType.MORNING || shift === ShiftType.MORNING_OT)) return 'ค่ากะเช้า (D)';
       if (SHIFT_ALLOWANCE_NIGHT_SHIFTS.indexOf(shift) >= 0) return 'ค่ากะดึก 165 บาท/วัน';
-      if (shift === ShiftType.MORNING || shift === ShiftType.MORNING_OT) return 'ค่ากะเช้า (D)';
       return 'ค่ากะ';
     },
 
@@ -493,7 +521,7 @@
       if (isHoliday) lines.push('ค่าจ้างวันหยุด: x2');
       lines.push('ค่าจ้างรายวัน: ' + formatMoney(dailyWage));
       lines.push('เงินพิเศษ: ' + formatMoney(special));
-      if (shiftAllow > 0) lines.push(this.getShiftAllowanceLabel(shift) + ': ' + formatMoney(shiftAllow));
+      if (shiftAllow > 0) lines.push(this.getShiftAllowanceLabel(shift, profile) + ': ' + formatMoney(shiftAllow));
       if (meal > 0) lines.push('ค่าข้าวกะดึก: ' + formatMoney(meal));
       if (milk > 0) lines.push('ค่านมกะดึก (OT): ' + formatMoney(milk));
       if (housing > 0) lines.push('ค่าเช่าบ้าน (รายวัน): ' + formatMoney(housing));
@@ -739,7 +767,7 @@
     },
   };
 
-  function buildMonthGrid(year, month, recordedDates, selectedDateKey, todayKey, profile) {
+  function buildMonthGrid(year, month, recordedDates, selectedDateKey, todayKey, profile, selectedStartType) {
     const startWeekday = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const cells = [];
@@ -751,7 +779,7 @@
         isToday: key === todayKey,
         isSelected: key === selectedDateKey,
         hasRecord: recordedDates.has(key),
-        is4Off2Rest: is4Off2RestDay(key, profile),
+        is4Off2Rest: is4Off2RestDay(key, profile, selectedStartType),
         isWeekend: isWeekend(key),
       });
     }
@@ -965,8 +993,9 @@
     function refreshCalendar() {
       $('monthYear').textContent = formatMonthYear(state.calYear, state.calMonth);
       const hint = $('scheduleHint');
-      const effectiveType = profile.getEffectiveScheduleType ? profile.getEffectiveScheduleType() : profile.scheduleType;
-      const activeScheduleStartDate = profile.getActiveScheduleStartDate ? profile.getActiveScheduleStartDate() : '';
+      const selectedStartType = $('homeStartDateType') ? $('homeStartDateType').value : (profile.activeStartDateType || 'startDate');
+      const effectiveType = getSelectedScheduleType(profile, selectedStartType);
+      const activeScheduleStartDate = getSelectedScheduleStartDate(profile, selectedStartType);
       if (effectiveType === '4off2' && activeScheduleStartDate) {
         hint.textContent = '4 หยุด 2: วันหยุดตามรอบ (สีแดง) นับจาก ' + formatDisplayDate(activeScheduleStartDate);
         hint.classList.remove('hidden');
@@ -975,7 +1004,7 @@
       }
       const grid = $('calendarGrid');
       grid.innerHTML = '';
-      buildMonthGrid(state.calYear, state.calMonth, getRecordedDates(), state.selectedDateKey, todayDateKey(), profile)
+      buildMonthGrid(state.calYear, state.calMonth, getRecordedDates(), state.selectedDateKey, todayDateKey(), profile, $('homeStartDateType').value)
         .forEach(function (cell) {
           if (cell.empty) {
             const empty = document.createElement('div');
@@ -1007,7 +1036,9 @@
       $('selectedDate').textContent = formatDisplayDate(key);
       const record = storage.getRecordForDate(key);
       const lines = [];
-      if (profile.scheduleType === '4off2' && is4Off2RestDay(key, profile)) {
+      const selectedStartType = $('homeStartDateType') ? $('homeStartDateType').value : (profile.activeStartDateType || 'startDate');
+      const effectiveType = getSelectedScheduleType(profile, selectedStartType);
+      if (effectiveType === '4off2' && is4Off2RestDay(key, profile, selectedStartType)) {
         lines.push('📅 วันหยุด 4-2 (ตามรอบ)');
       }
       if (!record || !record.hasContent()) {
@@ -2056,8 +2087,33 @@
       refreshHome();
     });
     $('homeStartDateType').addEventListener('change', function () {
+      const selectedStartType = $('homeStartDateType').value;
+      profile.activeStartDateType = selectedStartType;
+      profileStorage.save(profile);
+      state.selectedPeriodIndex = -1;
+      if (state.view === 'home') refreshHome();
+      if (state.view === 'calendar') refreshCalendar();
+      if (state.view === 'dayDetail') refreshDayDetail();
+    });
+    $('btnMode5Off2').addEventListener('click', function () {
+      profile.scheduleType = '5off2';
+      profile.activeStartDateType = 'startDate5Off2';
+      profileStorage.save(profile);
+      $('homeStartDateType').value = 'startDate5Off2';
       state.selectedPeriodIndex = -1;
       refreshHome();
+      refreshCalendar();
+      refreshDayDetail();
+    });
+    $('btnMode4Off2').addEventListener('click', function () {
+      profile.scheduleType = '4off2';
+      profile.activeStartDateType = 'startDate4Off2';
+      profileStorage.save(profile);
+      $('homeStartDateType').value = 'startDate4Off2';
+      state.selectedPeriodIndex = -1;
+      refreshHome();
+      refreshCalendar();
+      refreshDayDetail();
     });
     $('statusSelect').addEventListener('change', function () {
       updateDayDetailFieldsVisibility();
