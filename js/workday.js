@@ -826,6 +826,7 @@
       profile: $('viewProfile'),
       documents: $('viewDocuments'),
       documentsUpload: $('viewDocumentsUpload'),
+      info: $('viewInfo'),
     };
 
     const titles = {
